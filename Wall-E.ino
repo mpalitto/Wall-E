@@ -272,7 +272,7 @@ class TwoEnginePropulsion {
 TwoEnginePropulsion WallE_propulsion(Right_clock, Right_counterClock, Left_clock, Left_counterClock);
 
 #define HeadLR   D2  // Servo Motor Head move left and right
-#define HeadUDhl   D4  // Servo Motor Head move left and right
+#define HeadUD   D4  // Servo Motor Head move left and right
 #define LeftArm  D1  // Servo Motor Left Arm
 #define RightArm D3  // Servo Motor Right Arm
 Servo headLR; // Create a Servo object for moving head left and right
@@ -285,10 +285,10 @@ void setup() {
     headUD.attach(HeadUD);
     lArm.attach(LeftArm);
     rArm.attach(RightArm);
-    headLR.write(0); //  Set the servo to angle 0 degree (0 - 180)
-    headUD.write(0); //  Set the servo to angle 0 degree (0 - 180)
-    lArm.write(0);   //  Set the servo to angle 0 degree (0 - 180)
-    rArm.write(0);   //  Set the servo to angle 0 degree (0 - 180)
+    headLR.write(90); //  Set the servo to angle 0 degree (0 - 180)
+    headUD.write(90); //  Set the servo to angle 0 degree (0 - 180)
+    lArm.write(90);   //  Set the servo to angle 0 degree (0 - 180)
+    rArm.write(90);   //  Set the servo to angle 0 degree (0 - 180)
     Serial.begin(9600);
     pinMode(Right_counterClock, OUTPUT); // Set D7 as an output
     pinMode(Right_clock, OUTPUT);        // Set D8 as an output
@@ -427,7 +427,7 @@ void processCommand(String command) {
         Serial.println(speed);
         WallE_propulsion.left(speed);
         
-      } else if (cmd == "s ") { // set speed command
+      } else if (cmd == "s") { // set speed command
         Serial.print("STOP");
         WallE_propulsion.stop();
       } else isInvalidCMD = true;
@@ -435,7 +435,9 @@ void processCommand(String command) {
       Serial.println("Error: speed must be an INT number between 0 - 100");
   }
   if (isInvalidCMD) {
-    Serial.println("Command not recognized");
+    Serial.print("Command not recognized: '");
+    Serial.print(cmd);
+    Serial.println("'");
   }
 }
 

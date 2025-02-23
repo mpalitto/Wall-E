@@ -141,6 +141,107 @@ public:
     }
 };
 
+#include <ESP8266WiFi.h>
+#include <WiFiClient.h>
+
+const char* ssid = "";
+const char* password = "";
+const int serverPort = 8080;
+
+WiFiServer server(serverPort);
+WiFiClient client;
+
+void sendToClient(const String& message) {
+    Serial.print(message);
+    if (client && client.connected()) {
+        client.print(message);
+    }
+}
+
+void setupWIFIconnection() {
+    WiFi.begin(ssid, password);
+    sendToClient("Connecting to WiFi");
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(1000);
+        sendToClient(".");
+    }
+    sendToClient("\nConnected to WiFi\n");
+    sendToClient("IP Address: " + WiFi.localIP().toString() + "\n");
+    
+    server.begin();
+    sendToClient("TCP server started\n");
+}
+
+#define TERMINATION_CHAR '\n'  // Termination character for the input string
+
+class InputFromTCP {
+private:
+    char* buffer;       // Dynamically allocated buffer to store incoming characters
+    int bufferSize;     // Maximum size of the buffer
+    int index;          // Index for the next character to store
+    WiFiClient& client; // Reference to the WiFiClient instance
+
+public:
+    /**
+     * Constructor: Initializes the buffer with a given size and resets the index.
+     * @param size: Maximum size of the input buffer
+     * @param tcpClient: Reference to the WiFiClient object
+     */
+    InputFromTCP(int size, WiFiClient& tcpClient) : bufferSize(size), index(0), client(tcpClient) {
+        buffer = new char[bufferSize];  // Allocate memory for the buffer
+        buffer[0] = '\0';              // Initialize with an empty string
+    }
+
+    /**
+     * Destructor: Frees the dynamically allocated buffer.
+     */
+    ~InputFromTCP() {
+        delete[] buffer;  // Free the allocated memory
+    }
+
+    /**
+     * Method: processInput
+     * Processes incoming TCP data and detects a complete string.
+     * @return: True if a complete string (terminated by '\n') is detected, False otherwise.
+     */
+    bool processInput() {
+        while (client.available() > 0) {
+            char receivedChar = client.read();  // Read one character
+            if (receivedChar == TERMINATION_CHAR) {
+                buffer[index] = '\0';  // Null-terminate the string
+                return true;            // Input string is complete
+            } else {
+                // Add character to buffer if there's space
+                if (index < bufferSize - 1) {
+                    buffer[index++] = receivedChar;
+                } else {
+                    Serial.println("Error: Input buffer overflow!");
+                    reset();  // Reset the buffer
+                    return false;  // Input string is incomplete and buffer is full
+                }
+            }
+        }
+        return false;  // Input string is incomplete, still waiting for more chars
+    }
+
+    /**
+     * Method: getBuffer
+     * @return: Pointer to the buffer containing the received input string.
+     */
+    const char* getBuffer() const {
+        return buffer;
+    }
+
+    /**
+     * Method: reset
+     * Clears the buffer and resets the index.
+     */
+    void reset() {
+        index = 0;
+        buffer[0] = '\0';
+    }
+};
+
 // trimTrailingSpaces(String input): given a string removes trailing and ending spaces if present
 //
 // Starts from the end of the string and moves backward until a non-space character is found.
@@ -332,7 +433,7 @@ void setup() {
     lArm.attach(LeftArm);
     rArm.attach(RightArm);
     headLR.write(90); //  Set the servo to angle 0 degree (0 - 180)
-    headUD.write(90); //  Set the servo to angle 0 degree (0 - 180)
+    headUD.write(30); //  Set the servo to angle 0 degree (0 - 180)
     lArm.write(90);   //  Set the servo to angle 0 degree (0 - 180)
     rArm.write(90);   //  Set the servo to angle 0 degree (0 - 180)
     Serial.begin(9600);
@@ -343,6 +444,7 @@ void setup() {
     WallE_propulsion.stop();             // Set motor speed to 0% of full speed as pins are not in a defined state at startup
     delay(1000);
     Serial.println("Enter a string:");  // Prompt user
+    setupWIFIconnection();
 }
 
 // transformCommand is a function that abbreviates the command using its first character 
@@ -390,98 +492,91 @@ void processCommand(String command) {
   String cmd = transformCommand(command);
   String val = cmd.substring(2);  // Extract everything after 1st char
   cmd = cmd.substring(0, 2);
-  Serial.println("--> " + cmd + " " + val);
+  //Serial.println(cmd + " --> " + val);
   int speed = 0;
   int angle = 0;
   bool isInvalidCMD = false;
 
-  Serial.print("EXE Cmd: ");
+  sendToClient("EXEcuting Cmd: " + cmd);
   // ECHO command
   if (cmd == "E ") {
     // Execute the code for ECHO
-    Serial.print("ECHOING: ");
-    Serial.println(val);  // Echo the received string
-    
+    sendToClient("ECHOING: " + String(val) + "\n"); // Echo the received string   
   } else if (cmd == "r ") {    // right speed[0-100]% command
-      Serial.print("right");
+      //Serial.print("right");
       speed = checkIntegerRange(val, -100, 100);  
       if (speed == 0xBAD || speed == 0xDEAD) {  // value is NOT within the valid range OR not a number
-        Serial.println(", Speed: ERROR - not in range -100, 100: ");
+        sendToClient(", speed: ERROR - not in range -100, 100\n");
       } else {
-        Serial.print(", Speed: ");
-        Serial.println(speed);
+        sendToClient(", Speed: " + String(speed) + "\n");
         WallE_propulsion.right(speed);
       }
       
-    } else if (cmd == "l ") {  // left engine  command
-      Serial.print("left");
-      speed = checkIntegerRange(val, -100, 100);  
-      if (speed == 0xBAD || speed == 0xDEAD) {  // value is NOT within the valid range OR not a number
-        Serial.println(", Speed: ERROR - not in range -100, 100: ");
-      } else {
-        Serial.print(", Speed: ");
-        Serial.println(speed);
-        WallE_propulsion.left(speed);
-      }
-      
-    } else if (cmd == "hl") {  // head right - left  command
-      Serial.print("headLR");
-      angle = checkIntegerRange(val, 0, 180);  
-      if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
-        Serial.println(", angle: ERROR - not in range 0, 180: ");
-      } else {
-        Serial.print(", Angle: ");
-        Serial.println(angle);
-        headLR.write(angle);          
-      }
-      
-    } else if (cmd == "hu") {  // head up - down  command
-      angle = checkIntegerRange(val, 0, 180);  
-      if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
-        Serial.println(", angle: ERROR - not in range 0, 180: ");
-      } else {
-        Serial.print(", Angle: ");
-        Serial.println(angle);
-        headUD.write(angle);          
-      }
-      
-    } else if (cmd == "ra") {  // left Arm  command
-      Serial.print("rightArm");
-      angle = checkIntegerRange(val, 0, 180);  
-      if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
-        Serial.println(", angle: ERROR - not in range 0, 180: ");
-      } else {
-        Serial.print(", Angle: ");
-        Serial.println(angle);
-        rArm.write(angle);          
-      }
-      
-    } else if (cmd == "la") {  // left Arm  command
-      Serial.print("leftArm");
-      angle = checkIntegerRange(val, 0, 180);  
-      if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
-        Serial.println(", angle: ERROR - not in range 0, 180: ");
-      } else {
-        Serial.print(", Angle: ");
-        Serial.println(angle);
-        lArm.write(angle);          
-      }
-
-    } else if (cmd == "s") { // set speed command
-      Serial.print("STOP");
-      WallE_propulsion.stop();
+  } else if (cmd == "l ") {  // left engine  command
+    //Serial.print("left");
+    speed = checkIntegerRange(val, -100, 100);  
+    if (speed == 0xBAD || speed == 0xDEAD) {  // value is NOT within the valid range OR not a number
+      sendToClient(", speed: ERROR - not in range -100, 100\n");
     } else {
-    Serial.print("Command not recognized: '");
-    Serial.print(cmd);
-    Serial.println("'");
+      sendToClient(", Speed: " + String(speed) + "\n");
+      WallE_propulsion.left(speed);
+    }
+    
+  } else if (cmd == "hl") {  // head right - left  command
+    //Serial.print("headLR");
+    angle = checkIntegerRange(val, 0, 180);  
+    if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
+      sendToClient(", angle: ERROR - not in range 0, 180\n");
+    } else {
+      sendToClient(", Angle: " + String(angle) + "\n");
+      headLR.write(angle);          
+    }
+    
+  } else if (cmd == "hu") {  // head up - down  command
+    angle = checkIntegerRange(val, 0, 90);  
+    if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
+      sendToClient(", angle: ERROR - not in range 0, 90\n");
+    } else {
+      sendToClient(", Angle: " + String(angle) + "\n");
+      headUD.write(angle);          
+    }
+    
+  } else if (cmd == "ra") {  // left Arm  command
+    //Serial.print("rightArm");
+    angle = checkIntegerRange(val, 0, 180);  
+    if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
+      sendToClient(", angle: ERROR - not in range 0, 180\n");
+    } else {
+      sendToClient(", Angle: " + String(angle) + "\n");
+      rArm.write(angle);          
+    }
+    
+  } else if (cmd == "la") {  // left Arm  command
+    //Serial.print("leftArm");
+    angle = checkIntegerRange(val, 0, 180);  
+    if (angle == 0xBAD || angle == 0xDEAD) {  // value is NOT within the valid range OR not a number
+      sendToClient(", angle: ERROR - not in range 0, 180\n");
+    } else {
+      sendToClient(", Angle: " + String(angle) + "\n");
+      lArm.write(180 - angle);          // in this way it will match the right arm 0=down 180=up
+    }
+
+  } else if (cmd == "s") { // set speed command
+    sendToClient("STOP\n");
+    WallE_propulsion.stop();
+  } else {
+    sendToClient("Command not recognized: '" + String(cmd) + "'\n");
   }
 } 
 
 // Command string initialization
 InputFromSerial inputBuffer(64);  // Instantiate the InputFromSerial object with a buffer size of 64
+InputFromTCP inputProcessor(64, client);
 // make code more readable
-#define command inputBuffer.getBuffer()
-#define getCMD inputBuffer.processInput()
+#define commandFromSerial inputBuffer.getBuffer()
+#define getCMDfromSerial inputBuffer.processInput()
+#define commandFromTCP inputProcessor.getBuffer()
+#define getCMDfromTCP inputProcessor.processInput()
 
 //////////
 // loop //
@@ -489,16 +584,31 @@ InputFromSerial inputBuffer(64);  // Instantiate the InputFromSerial object with
 
 void loop() {
     // Call the method to process serial input
-    if (getCMD) {  // check if command has been received from serial interface
+    if (getCMDfromSerial) {  // check if command has been received from serial interface
 
         // give a feedback as debugging tool
-        Serial.print("You entered: ");  
-        Serial.println(command);  // Echo the received string
+        //Serial.print("You entered: ");  
+        //Serial.println(command);  // Echo the received string
         
-        processCommand(command); // process and execute the command
+        processCommand(commandFromSerial); // process and execute the command
         
         inputBuffer.reset();  // Reset the buffer
     }
 
-    // Perform other tasks here if needed
+    if (!client || !client.connected()) {
+        client = server.available(); // Accept new client connection
+        if (client) {
+            sendToClient("New client connected from " + client.remoteIP().toString() + ":" + String(client.remotePort()) + "\n");
+            sendToClient("enter your command: ");
+        }
+    }
+    
+    if (client) {
+        if (getCMDfromTCP) {
+          String command = String(commandFromTCP);
+          sendToClient("Received: " + command + "\n");
+          processCommand(command); // process and execute the command
+          inputProcessor.reset();
+        }
+    }
 }
